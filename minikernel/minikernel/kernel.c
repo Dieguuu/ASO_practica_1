@@ -207,6 +207,21 @@ static void int_terminal(){
         return;
 }
 
+
+void round_robin(){
+	if(p_proc_actual->estado == LISTO) p_proc_actual->robin_seconds--;
+
+		if(p_proc_actual->robin_seconds <= 0){
+			printk("Ronda del proceso terminada, llamando a interrupción de software.\n");
+
+			/* Como se indica en el manual del minikernel, las interrupciones de Software se
+				realizan para el tratamiento de cambios de contexto involuntarios */
+			activar_int_SW();
+		}
+}
+
+
+
 /*
  * Tratamiento de interrupciones de reloj
  */
@@ -215,6 +230,7 @@ static void int_reloj(){
 	/* Para mayor limpieza en la ejecución del código se prescinde de este print
 	printk("-> TRATANDO INT. DE RELOJ\n");	*/
 	timer();
+	round_robin();
 
         return;
 }
@@ -240,6 +256,8 @@ static void tratar_llamsis(){
 static void int_sw(){
 
 	printk("-> TRATANDO INT. SW\n");
+
+	robin_process_change();
 
 	return;
 }
@@ -274,6 +292,10 @@ static int crear_tarea(char *prog){
 			&(p_proc->contexto_regs));
 		p_proc->id=proc;
 		p_proc->estado=LISTO;
+
+		/* A la hora de crear el proceso deben establecerse el número de TICKS
+			de round robin que debe estar ejecutándose */
+		p_proc->robin_seconds = TICKS_POR_RODAJA;
 
 		/* lo inserta al final de cola de listos */
 		insertar_ultimo(&lista_listos, p_proc);
@@ -426,7 +448,9 @@ void timer(){
 }
 
 /*
+ *
  *	Funciones relacionadas con el tratamiento de mutex
+ *
  */
 
 /* Función que revisa que el nombre introducido al nuevo mutex no se encuentra actualmente en uso */
@@ -816,6 +840,29 @@ int cerrar_mutex(unsigned int mutexid){
 	return 0;
 }
 
+
+/*
+ *
+ *	Round robin
+ *
+ */
+
+
+
+void robin_process_change(){
+
+	BCPptr actual_process = p_proc_actual;
+	int interruption_level = fijar_nivel_int(NIVEL_3);
+
+	eliminar_primero(&lista_listos);
+	insertar_ultimo(&lista_listos, actual_process);
+
+	p_proc_actual = planificador();
+	if(p_proc_actual->robin_seconds < TICKS_POR_RODAJA) p_proc_actual->robin_seconds = TICKS_POR_RODAJA;
+	
+	fijar_nivel_int(interruption_level);
+	cambio_contexto(&(actual_process->contexto_regs), &(p_proc_actual->contexto_regs));
+}
 
 /*
  *
